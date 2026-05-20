@@ -7,7 +7,7 @@ boundaries and forecasts when violations are likely to occur.
 
 from __future__ import annotations
 
-from typing import Dict, List, Optional
+from typing import TYPE_CHECKING, Dict, List, Optional, Sequence, Tuple, Union
 
 import numpy as np
 
@@ -64,13 +64,70 @@ class DriftDetector:
             intercepts[d] = ym - slopes[d] * xm
         return slopes, intercepts
 
-    def detect_drift(self, bounds: Optional[list[tuple[float, float]]] = None) -> dict:
+    if TYPE_CHECKING:
+        from flux_lib.core import ConstraintEngine
+
+    @staticmethod
+    def _parse_bounds(
+        bounds: Union[
+            "ConstraintEngine",
+            List[Tuple[str, float, float]],
+            List[Tuple[float, float]],
+            None,
+        ],
+        n_dims: int,
+    ) -> tuple[list[str], list[tuple[float, float]] | None]:
+        """Normalise *bounds* into (names, lo_hi_pairs).
+
+        Accepts:
+          - ConstraintEngine   → names + lo/hi from constraints
+          - [(name, lo, hi),…] → explicit names
+          - [(lo, hi),…]       → sensor_N names (backwards compat)
+          - None               → sensor_N names, no bounds
+        """
+        if bounds is None:
+            return [f"sensor_{d}" for d in range(n_dims)], None
+
+        # ConstraintEngine
+        if hasattr(bounds, "get_bounds") and hasattr(bounds, "n"):
+            engine: ConstraintEngine = bounds  # type: ignore[assignment]
+            names = [engine.constraints[i].name for i in range(min(engine.n, n_dims))]
+            # Pad if engine has fewer constraints than dims
+            while len(names) < n_dims:
+                names.append(f"sensor_{len(names)}")
+            lo_hi = [(engine.constraints[i].lo, engine.constraints[i].hi) for i in range(min(engine.n, n_dims))]
+            return names, lo_hi
+
+        # Peek at first element to distinguish (name, lo, hi) vs (lo, hi)
+        first = bounds[0]  # type: ignore[index]
+        if len(first) == 3:
+            # (name, lo, hi)
+            names = [str(b[0]) for b in bounds]  # type: ignore[index]
+            lo_hi = [(float(b[1]), float(b[2])) for b in bounds]  # type: ignore[index]
+            return names, lo_hi
+        else:
+            # (lo, hi) — backwards compat
+            names = [f"sensor_{d}" for d in range(len(bounds))]  # type: ignore[arg-type]
+            lo_hi = [(float(b[0]), float(b[1])) for b in bounds]  # type: ignore[index]
+            return names, lo_hi
+
+    def detect_drift(
+        self,
+        bounds: Union[
+            "ConstraintEngine",
+            List[Tuple[str, float, float]],
+            List[Tuple[float, float]],
+            None,
+        ] = None,
+    ) -> dict:
         """Check if values are drifting toward bounds.
 
         Args:
-            bounds: Optional list of (lo, hi) per sensor. If provided,
-                    estimates time-to-violation. If None, only direction/rate
-                    are reported.
+            bounds: One of:
+                - ConstraintEngine: uses constraint names and bounds
+                - list of (name, lo, hi) tuples: explicit names per sensor
+                - list of (lo, hi) tuples: backwards compat (sensor_N names)
+                - None: no bounds, sensor_N names
 
         Returns:
             dict with keys:
@@ -85,10 +142,10 @@ class DriftDetector:
         T, D = data.shape
         slopes, _ = self._trends()
 
+        names, lo_hi_pairs = self._parse_bounds(bounds, D)
+
         # Standard deviation per sensor for significance threshold
         stds = data.std(axis=0)
-        # A slope is "significant" if the total drift over the window
-        # exceeds 0.1 * std (conservative threshold)
         threshold = 0.1 * stds / T if T > 0 else np.zeros(D)
 
         per_sensor: Dict[str, dict] = {}
@@ -98,7 +155,7 @@ class DriftDetector:
         last_reading = data[-1]
 
         for d in range(D):
-            name = f"sensor_{d}"
+            name = names[d] if d < len(names) else f"sensor_{d}"
             slope = slopes[d]
             abs_slope = abs(slope)
             direction = "stable"
@@ -112,12 +169,11 @@ class DriftDetector:
                 rate = float(slope)
                 any_drifting = True
 
-            sensor_info = {"direction": direction, "rate": rate}
-            per_sensor[name] = sensor_info
+            per_sensor[name] = {"direction": direction, "rate": rate}
 
             # Time-to-violation estimate
-            if bounds is not None and d < len(bounds):
-                lo, hi = bounds[d]
+            if lo_hi_pairs is not None and d < len(lo_hi_pairs):
+                lo, hi = lo_hi_pairs[d]
                 ttv = None
                 if direction == "toward_hi" and slope > 0:
                     readings_to_violation = (hi - last_reading[d]) / slope

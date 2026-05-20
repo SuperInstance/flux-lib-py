@@ -354,6 +354,12 @@ class ConstraintEngine:
         with open(path) as f:
             return cls.from_dict(json.load(f))
 
+    # ── Convenience ───────────────────────────────────────────
+
+    def get_bounds(self) -> list[tuple[str, float, float]]:
+        """Return list of (name, lo, hi) for each constraint."""
+        return [(self._names[i], self._lo[i], self._hi[i]) for i in range(self.n)]
+
     # ── Aggregation ───────────────────────────────────────────
 
     def check_and_aggregate(self, values_batch: list[list[float]]) -> dict:

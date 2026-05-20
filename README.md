@@ -209,22 +209,36 @@ print(result["severity_breakdown"])                # {"PASS": 1, "WARNING": 2, .
 ## Drift Detection
 
 ```python
-from flux_lib import DriftDetector
+from flux_lib import DriftDetector, ConstraintEngine
+
+# Option 1: Pass a ConstraintEngine — uses constraint names automatically
+eng = ConstraintEngine([
+    {"lo": 0, "hi": 8000, "name": "rpm"},
+    {"lo": -40, "hi": 150, "name": "coolant_temp"},
+    {"lo": 0, "hi": 100, "name": "throttle"},
+])
 
 det = DriftDetector(window_size=100)
-bounds = [(0, 8000), (-40, 150), (0, 100)]  # lo/hi per sensor
-
 for reading in sensor_stream:
     det.add(reading)
     if det.n >= 20:
-        drift = det.detect_drift(bounds=bounds)
+        drift = det.detect_drift(bounds=eng)
         if drift["drifting"]:
             for name, info in drift["per_sensor"].items():
                 print(f"{name}: {info['direction']} at rate {info['rate']:.3f}")
-            # Time-to-violation estimates
             for name, ttv in drift["time_to_violation"].items():
                 if ttv is not None:
                     print(f"  {name}: ~{ttv:.0f} readings until violation")
+
+# Option 2: Named bounds — list of (name, lo, hi) tuples
+bounds = [("rpm", 0, 8000), ("coolant_temp", -40, 150)]
+drift = det.detect_drift(bounds=bounds)
+
+# Option 3: Plain (lo, hi) tuples — backwards compat, names are sensor_0, sensor_1, …
+drift = det.detect_drift(bounds=[(0, 8000), (-40, 150)])
+
+# Option 4: Get bounds from a ConstraintEngine
+bounds_list = eng.get_bounds()  # → [("rpm", 0, 8000), ("coolant_temp", -40, 150), …]
 
 # Forecast next 10 readings based on current trend
 forecasts = det.forecast(n_ahead=10)
