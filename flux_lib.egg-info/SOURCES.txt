@@ -2,6 +2,7 @@ README.md
 pyproject.toml
 flux_lib/__init__.py
 flux_lib/core.py
+flux_lib/drift.py
 flux_lib/fracture.py
 flux_lib/presets.py
 flux_lib/sediment.py
@@ -12,8 +13,12 @@ flux_lib.egg-info/SOURCES.txt
 flux_lib.egg-info/dependency_links.txt
 flux_lib.egg-info/requires.txt
 flux_lib.egg-info/top_level.txt
+tests/test_aggregation.py
 tests/test_core.py
+tests/test_drift.py
 tests/test_fracture.py
 tests/test_sediment.py
+tests/test_serialization.py
 tests/test_shadowgap.py
 tests/test_thermo.py
+tests/test_thermo_decisions.py
