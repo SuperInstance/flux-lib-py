@@ -282,3 +282,7 @@ pytest tests/ -v
 ## License
 
 MIT
+
+## Related
+
+Part of the broader [Plato ecosystem](https://github.com/SuperInstance): see [plato-core](https://github.com/SuperInstance/plato-core), [plato-training](https://github.com/SuperInstance/plato-training), and [tensor-spline](https://github.com/SuperInstance/tensor-spline).
