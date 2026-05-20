@@ -126,6 +126,17 @@ class ThermoEngine:
     """
     Unified thermodynamic analysis of constraint systems.
 
+    Practical interpretation guide:
+        - Z close to 1.0 → system is over-constrained (very few valid states)
+        - Z large       → many possible states (system is under-constrained)
+        - Temperature high → less strict checking (more values pass)
+        - Temperature low  → very strict checking (only tight fits pass)
+        - Entropy high → violations are scattered across many constraints
+        - Entropy low  → violations are concentrated in few constraints
+        - Free energy → how much useful constraint-satisfying capacity remains
+        - Specific heat → how sensitive the system is to temperature changes
+        - ideal_gas_check() → True means constraints are independent
+
     Usage:
         engine = ThermoEngine(weights=[1.0, 2.0, 0.5])
         result = engine.partition(temperature=1.0)

@@ -42,11 +42,13 @@ It's the unified library that pulls together all the flux subsystems: exact chec
 
 ## Constraint Checking
 
+**The error mask is uint8, supporting up to 8 constraints.** For more constraints, use multiple engines.
+
 ```python
 from flux_lib import ConstraintEngine
 
 eng = ConstraintEngine.from_preset("automotive_can")
-result = eng.check(9000)  # engine RPM out of range
+result = eng.check(9000)  # checks one value against ALL 8 constraints
 print(result.passed)       # False
 print(result.severity.name) # CRITICAL
 
@@ -54,6 +56,30 @@ print(result.severity.name) # CRITICAL
 import numpy as np
 masks = eng.check_batch(np.array([3000, 9000, -40]))
 # → array([0, 1, 4], dtype=uint8)
+```
+
+### check_vector — N values against N constraints
+
+`check()` tests ONE value against ALL constraints. For sensor arrays where each reading
+has its own bounds, use `check_vector`:
+
+```python
+eng = ConstraintEngine.from_preset("automotive_can")
+# 8 sensor readings, one per constraint
+result = eng.check_vector([3000, 65, 90, 40, 10, 45, 12.5, 50])
+print(result.passed)        # True — each value checked against its OWN constraint
+print(result.error_mask)    # 0
+
+result = eng.check_vector([3000, 65, 90, 40, 10, 45, 12.5, 999])
+print(result.passed)        # False — fuel out of range
+print(result.violated_count) # 1
+
+# Batch mode for time-series
+samples = np.array([
+    [3000, 65, 90, 40, 10, 45, 12.5, 50],
+    [9000, 65, 90, 40, 10, 45, 12.5, 50],  # RPM violation
+])
+masks = eng.check_vector_batch(samples)  # → array([0, 1], dtype=uint8)
 ```
 
 ## Fracture & Coalesce
@@ -118,6 +144,20 @@ p = engine.partition(temperature=1.0)
 print(f"Z = {p.Z}, F = {p.free_energy}, S = {p.entropy}")
 print(f"Independent constraints: {engine.ideal_gas_check()}")
 ```
+
+### Practical Interpretation
+
+| Value | Meaning |
+|-------|---------|
+| **Z close to 1.0** | System is over-constrained — very few valid states |
+| **Z large** | System is under-constrained — many possible states |
+| **Temperature high** | Less strict checking (more values pass) |
+| **Temperature low** | Very strict checking (only tight fits pass) |
+| **Entropy high** | Violations are scattered across many constraints |
+| **Entropy low** | Violations are concentrated in few constraints |
+| **Free energy** | How much useful constraint-satisfying capacity remains |
+| **Specific heat** | How sensitive the system is to temperature changes |
+| **ideal_gas_check() = True** | Constraints are independent (no coupling) |
 
 ## Performance
 

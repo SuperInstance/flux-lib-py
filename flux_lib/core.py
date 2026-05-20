@@ -103,9 +103,14 @@ class ConstraintEngine:
     """
     Exact constraint engine — zero false negatives.
 
-    check()       → CheckResult
-    check_mask()  → int (zero-alloc hot path)
-    check_batch() → np.ndarray of uint8 masks
+    The error mask is uint8, supporting up to **8 constraints**.
+    For more constraints, use multiple engines.
+
+    check()             → CheckResult (one value against ALL constraints)
+    check_vector()      → CheckResult (N values against N respective constraints)
+    check_vector_batch()→ np.ndarray of uint8 masks (batch vector mode)
+    check_mask()        → int (zero-alloc hot path)
+    check_batch()       → np.ndarray of uint8 masks
     """
 
     __slots__ = ("_lo", "_hi", "_names", "_severities", "n", "constraints")
@@ -197,6 +202,85 @@ class ConstraintEngine:
             violated_count=vc,
             violations=violations,
         )
+
+    # ── Vector: N values → N respective constraints ──────────
+
+    def check_vector(self, values: list[float]) -> CheckResult:
+        """Check N values against N respective constraints.
+
+        value[i] is checked against constraint[i].
+        Returns a CheckResult where bit i is set if value[i]
+        violates its corresponding constraint.
+        """
+        if len(values) != self.n:
+            raise ValueError(
+                f"Expected {self.n} values (one per constraint), got {len(values)}"
+            )
+        mask = 0
+        lo_mask = 0
+        hi_mask = 0
+        violations: list[ViolationDetail] = []
+
+        for i in range(self.n):
+            v = float(values[i])
+            is_nan = v != v
+            if is_nan:
+                lo_f = hi_f = True
+            else:
+                lo_f = v < self._lo[i]
+                hi_f = v > self._hi[i]
+            p = not lo_f and not hi_f
+            if not p:
+                mask |= (1 << i)
+            if lo_f:
+                lo_mask |= (1 << i)
+            if hi_f:
+                hi_mask |= (1 << i)
+            violations.append(ViolationDetail(
+                name=self._names[i], lo=self._lo[i], hi=self._hi[i], value=v,
+                passed=p, lo_violated=lo_f, hi_violated=hi_f,
+            ))
+
+        vc = bin(mask).count("1")
+        worst = Severity.PASS
+        for i in range(self.n):
+            if mask & (1 << i):
+                worst = max(worst, self._severities[i])
+        if worst == Severity.PASS and vc > 0:
+            worst = _severity_for_count(vc)
+
+        return CheckResult(
+            error_mask=mask,
+            severity=worst if vc > 0 else Severity.PASS,
+            violated_lo=lo_mask,
+            violated_hi=hi_mask,
+            violated_count=vc,
+            violations=violations,
+        )
+
+    def check_vector_batch(self, values_array: np.ndarray) -> np.ndarray:
+        """Vectorized batch check_vector.
+
+        values_array shape: (N_samples, N_constraints) or (N_constraints,).
+        value[j, i] is checked against constraint[i].
+        Returns np.ndarray of uint8 error_masks with shape (N_samples,).
+        """
+        vals = np.asarray(values_array, dtype=np.float64)
+        if vals.ndim == 1:
+            vals = vals.reshape(1, -1)
+        if vals.shape[1] != self.n:
+            raise ValueError(
+                f"Expected {self.n} columns (one per constraint), got {vals.shape[1]}"
+            )
+        N = vals.shape[0]
+        masks = np.zeros(N, dtype=np.uint8)
+        nan_rows = np.any(np.isnan(vals), axis=1)
+        for i in range(self.n):
+            col = vals[:, i]
+            col_nan = np.isnan(col)
+            violated = col_nan | (col < self._lo[i]) | (col > self._hi[i])
+            masks[violated] |= np.uint8(1 << i)
+        return masks
 
     # ── Batch: numpy vectorized ──────────────────────────────
 

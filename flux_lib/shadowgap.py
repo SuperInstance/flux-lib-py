@@ -133,6 +133,19 @@ class ShadowgapResult:
     per_constraint_shadowgap: np.ndarray
     surprise_scores: np.ndarray
 
+    def summary(self) -> dict:
+        """Human-readable summary of shadowgap analysis."""
+        return {
+            "n_points": self.n_points,
+            "n_true_violations": self.n_true_violations,
+            "n_consensus_catches": self.n_consensus_catches,
+            "n_shadowgap": self.n_shadowgap,
+            "shadowgap_rate": round(self.shadowgap_rate, 4),
+            "shadowgap_fraction": round(self.shadowgap_fraction, 6),
+            "per_constraint": self.per_constraint_shadowgap.tolist(),
+            "clean": self.n_shadowgap == 0,
+        }
+
 
 class ShadowgapFinder:
     """
