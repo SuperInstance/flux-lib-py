@@ -38,7 +38,7 @@ Think of it this way: if you have three checkers and none of them catch a partic
 
 It's the unified library that pulls together all the flux subsystems: exact checking, fracture-coalesce for parallelization, sediment layers for edge-case corrections, shadowgap detection for blind spots, and thermodynamic analysis for system-level diagnostics.
 
-10 industry presets built in: `automotive_can`, `aviation_adsb`, `medical_fhir`, `financial_fix`, `energy_scada`, `iot_mqtt`, `maritime_nmea`, `nuclear_reactor`, `railway_ertms`, `robotics`.
+Ships with 10 industry presets: `automotive_can`, `aviation_adsb`, `medical_fhir`, `financial_fix`, `energy_scada`, `iot_mqtt`, `maritime_nmea`, `nuclear_reactor`, `railway_ertms`, `robotics`.
 
 ## Constraint Checking
 
