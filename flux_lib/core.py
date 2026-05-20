@@ -113,7 +113,7 @@ class ConstraintEngine:
     check_batch()       → np.ndarray of uint8 masks
     """
 
-    __slots__ = ("_lo", "_hi", "_names", "_severities", "n", "constraints")
+    __slots__ = ("_lo", "_hi", "_names", "_severities", "n", "constraints", "_preset_name")
 
     def __init__(self, constraints: List[Dict]):
         if not constraints:
@@ -142,6 +142,7 @@ class ConstraintEngine:
             )
             for i in range(self.n)
         ]
+        self._preset_name = None
 
     # ── Zero-alloc hot path ─────────────────────────────────
 
@@ -302,7 +303,9 @@ class ConstraintEngine:
     @classmethod
     def from_preset(cls, name: str) -> "ConstraintEngine":
         """Create engine from industry preset."""
-        return cls(get_preset(name))
+        engine = cls(get_preset(name))
+        engine._preset_name = name
+        return engine
 
     @classmethod
     def available_presets(cls) -> List[str]:
@@ -316,6 +319,94 @@ class ConstraintEngine:
         for i in range(iterations):
             self.check_mask((i % 1000) - 500)
         return iterations / (time.perf_counter() - t0)
+
+    # ── Serialization ────────────────────────────────────────
+
+    def to_dict(self) -> dict:
+        """Export engine config as JSON-serializable dict."""
+        return {
+            "constraints": [
+                {"lo": self._lo[i], "hi": self._hi[i], "name": self._names[i],
+                 "severity": int(self._severities[i])}
+                for i in range(self.n)
+            ],
+            "preset": getattr(self, "_preset_name", None),
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "ConstraintEngine":
+        """Load engine from saved config dict."""
+        engine = cls(data["constraints"])
+        if data.get("preset"):
+            engine._preset_name = data["preset"]
+        return engine
+
+    def save(self, path: str) -> None:
+        """Save config to JSON file."""
+        import json
+        with open(path, "w") as f:
+            json.dump(self.to_dict(), f, indent=2)
+
+    @classmethod
+    def load(cls, path: str) -> "ConstraintEngine":
+        """Load config from JSON file."""
+        import json
+        with open(path) as f:
+            return cls.from_dict(json.load(f))
+
+    # ── Aggregation ───────────────────────────────────────────
+
+    def check_and_aggregate(self, values_batch: list[list[float]]) -> dict:
+        """Check a batch of vector readings and return aggregated summary.
+
+        Each inner list has N values (one per constraint).
+        Returns dict with:
+            total_readings, total_violations, violation_rate,
+            per_constraint_violation_rate, worst_reading, severity_breakdown.
+        """
+        total = len(values_batch)
+        if total == 0:
+            return {
+                "total_readings": 0, "total_violations": 0,
+                "violation_rate": 0.0,
+                "per_constraint_violation_rate": {},
+                "worst_reading": None,
+                "severity_breakdown": {s.name: 0 for s in Severity},
+            }
+
+        total_violations = 0
+        per_constraint_counts = [0] * self.n
+        severity_breakdown = {s.name: 0 for s in Severity}
+        worst_idx = 0
+        worst_count = 0
+        results: list[CheckResult] = []
+
+        for idx, values in enumerate(values_batch):
+            r = self.check_vector(values)
+            vc = r.violated_count
+            total_violations += vc
+            if vc > worst_count:
+                worst_count = vc
+                worst_idx = idx
+            for i in range(self.n):
+                if r.error_mask & (1 << i):
+                    per_constraint_counts[i] += 1
+            severity_breakdown[r.severity.name] += 1
+            results.append(r)
+
+        per_constraint_rate = {
+            self._names[i]: per_constraint_counts[i] / total
+            for i in range(self.n)
+        }
+
+        return {
+            "total_readings": total,
+            "total_violations": total_violations,
+            "violation_rate": total_violations / (total * self.n) if total > 0 else 0.0,
+            "per_constraint_violation_rate": per_constraint_rate,
+            "worst_reading": (worst_idx, results[worst_idx]),
+            "severity_breakdown": severity_breakdown,
+        }
 
     def __repr__(self) -> str:
         return f"ConstraintEngine(n={self.n}, constraints={self._names})"

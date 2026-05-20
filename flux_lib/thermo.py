@@ -191,3 +191,81 @@ class ThermoEngine:
             "specific_heat": p.specific_heat,
             "ideal_gas": self.ideal_gas_check(),
         }
+
+    def recommend(self, temperature: float = 1.0) -> dict:
+        """What to DO about the current thermodynamic state.
+
+        Returns dict with:
+            action: 'tighten' | 'loosen' | 'maintain' | 'investigate'
+            reason: human-readable explanation
+            suggested_temperature: float (if adjustment needed)
+            focus_constraints: list of constraint indices to focus on
+        """
+        p = self.partition(temperature)
+        Z = p.Z
+        S = p.entropy
+        probs = p.violation_probabilities
+        ideal = self.ideal_gas_check()
+
+        # Find constraints with highest violation probability
+        focus_indices = []
+        if len(probs) > 0:
+            mean_prob = float(np.mean(probs))
+            focus_indices = [int(i) for i in range(len(probs)) if probs[i] > mean_prob * 1.5]
+            # If none stand out, pick top 3
+            if not focus_indices and len(probs) > 0:
+                sorted_idx = np.argsort(probs)[::-1]
+                focus_indices = [int(i) for i in sorted_idx[:min(3, len(sorted_idx))]]
+
+        # Decision logic
+        # Z close to 1 → over-constrained
+        # Z very large → under-constrained
+        # High entropy → scattered violations
+        # Low entropy → concentrated violations
+
+        if Z < 1.5:
+            # Over-constrained: very few valid states
+            action = "loosen"
+            suggested_temp = temperature * 1.5
+            reason = (
+                f"Z={Z:.2f} is close to 1.0 — the system is over-constrained. "
+                f"Very few valid states remain. Consider widening bounds "
+                f"or removing redundant constraints."
+            )
+            if not ideal:
+                action = "investigate"
+                reason += " Constraints are coupled — use fracture() to find coupling."
+        elif Z > 100:
+            # Under-constrained: many possible states
+            action = "tighten"
+            suggested_temp = temperature * 0.7
+            reason = (
+                f"Z={Z:.1f} is large — the system is under-constrained. "
+                f"Many states are considered valid. Consider narrowing bounds."
+            )
+        else:
+            # Moderate Z — check entropy for further guidance
+            action = "maintain"
+            suggested_temp = temperature
+            reason = (
+                f"Z={Z:.2f} is in a healthy range. "
+            )
+            if S > 3.0:
+                reason += (
+                    f"Entropy is high ({S:.2f}) — violations are scattered. "
+                    f"Look for a systemic issue rather than individual sensors."
+                )
+            elif S < 0.5 and self.n > 2:
+                reason += (
+                    f"Entropy is low ({S:.2f}) — violations are concentrated. "
+                    f"Investigate the focused constraints."
+                )
+            else:
+                reason += "System is operating normally."
+
+        return {
+            "action": action,
+            "reason": reason,
+            "suggested_temperature": float(suggested_temp),
+            "focus_constraints": focus_indices,
+        }

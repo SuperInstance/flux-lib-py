@@ -4,7 +4,7 @@ Constraint theory as a single import:
 
 ```python
 from flux_lib import ConstraintEngine, fracture, coalesce, SedimentStack
-from flux_lib import ShadowgapFinder, ThermoEngine
+from flux_lib import ShadowgapFinder, ThermoEngine, DriftDetector
 ```
 
 ```bash
@@ -170,6 +170,85 @@ Exact checking is zero-allocation on the hot path. Batch mode uses numpy vectori
 | CLI tool for quick checks | [flux-check](../flux-check-py) |
 | Hyperbolic model routing | [flux-hyperbolic](../flux-hyperbolic-py) |
 | Genetic expression engine | [flux-genome](../flux-genome-py) |
+
+## Serialization — Save/Load Configs
+
+```python
+eng = ConstraintEngine.from_preset("automotive_can")
+
+# Export to dict (JSON-serializable)
+config = eng.to_dict()
+
+# Save to file
+eng.save("automotive_config.json")
+
+# Load from file
+restored = ConstraintEngine.load("automotive_config.json")
+assert restored.n == eng.n  # identical checking behavior
+
+# Round-trip via dict
+restored2 = ConstraintEngine.from_dict(config)
+```
+
+## Aggregation — Batch Analysis
+
+```python
+eng = ConstraintEngine.from_preset("automotive_can")
+readings = [
+    [3000, 65, 90, 40, 10, 45, 12.5, 50],   # all pass
+    [9000, 65, 90, 40, 10, 45, 12.5, 50],   # RPM violation
+    [3000, 65, 90, 40, 10, 45, 7.5, 50],    # battery violation
+]
+result = eng.check_and_aggregate(readings)
+print(result["violation_rate"])                    # 0.083 (2/24)
+print(result["per_constraint_violation_rate"])     # per-sensor rates
+print(result["worst_reading"])                     # (index, CheckResult)
+print(result["severity_breakdown"])                # {"PASS": 1, "WARNING": 2, ...}
+```
+
+## Drift Detection
+
+```python
+from flux_lib import DriftDetector
+
+det = DriftDetector(window_size=100)
+bounds = [(0, 8000), (-40, 150), (0, 100)]  # lo/hi per sensor
+
+for reading in sensor_stream:
+    det.add(reading)
+    if det.n >= 20:
+        drift = det.detect_drift(bounds=bounds)
+        if drift["drifting"]:
+            for name, info in drift["per_sensor"].items():
+                print(f"{name}: {info['direction']} at rate {info['rate']:.3f}")
+            # Time-to-violation estimates
+            for name, ttv in drift["time_to_violation"].items():
+                if ttv is not None:
+                    print(f"  {name}: ~{ttv:.0f} readings until violation")
+
+# Forecast next 10 readings based on current trend
+forecasts = det.forecast(n_ahead=10)
+```
+
+## Thermodynamic Recommendations
+
+```python
+from flux_lib import ThermoEngine
+
+engine = ThermoEngine([1.0, 2.0, 0.5])
+rec = engine.recommend(temperature=1.0)
+print(rec["action"])              # 'maintain' | 'tighten' | 'loosen' | 'investigate'
+print(rec["reason"])             # human-readable explanation
+print(rec["suggested_temperature"])  # adjustment if needed
+print(rec["focus_constraints"])     # indices of constraints to focus on
+```
+
+| Action | Meaning | When |
+|--------|---------|------|
+| `tighten` | Narrow bounds or lower temperature | Z > 100 (under-constrained) |
+| `loosen` | Widen bounds or raise temperature | Z < 1.5 (over-constrained) |
+| `investigate` | Constraints are coupled — use fracture() | Over-constrained + not ideal gas |
+| `maintain` | System is operating normally | Z in healthy range |
 
 ## Core Properties
 
